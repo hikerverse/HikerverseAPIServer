@@ -1,0 +1,12 @@
+pymysql
+starlette
+uvicorn
+scipy
+pillow
+numpy
+setuptools~=65.5.0
+requests~=2.32.5
+fastapi~=0.121.3
+SQLAlchemy~=2.0.44
+passlib~=1.7.4
+pydantic~=2.12.4

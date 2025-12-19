@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/venv" />
+      <excludeFolder url="file://$MODULE_DIR$/vvenv" />
+    </content>
+    <content url="file://$MODULE_DIR$/../HikerverseClient" />
+    <content url="file://$MODULE_DIR$/../HikerverseDB" />
+    <content url="file://$MODULE_DIR$/../HikerverseSpacecraft" />
+    <content url="file://$MODULE_DIR$/../HikerverseTickServer" />
+    <content url="file://$MODULE_DIR$/../HikerverseUniverse" />
+    <orderEntry type="jdk" jdkName="Python 3.10 (venv) (2)" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

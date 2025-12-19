@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../HikerverseClient" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../HikerverseDB" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../HikerverseSpacecraft" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../HikerverseTickServer" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../HikerverseUniverse" vcs="Git" />
+  </component>
+</project>

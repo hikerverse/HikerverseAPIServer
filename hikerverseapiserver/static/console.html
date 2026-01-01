@@ -1,0 +1,547 @@
+<!-- html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Remote Console</title>
+  <style>
+    body { font-family: monospace; margin: 0; padding: 0; display:flex; height:100vh; flex-direction:column; }
+    /* status bar at top */
+    #statusBar {
+      height:36px;
+      background:#0e1620;
+      color:#dfe6ea;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px;
+      border-bottom:1px solid #222;
+      font-size:13px;
+      box-sizing:border-box;
+    }
+    #statusText { display:flex; align-items:center; gap:10px; }
+    #statusToken { color:#9fb6c6; font-family:monospace; font-size:12px; opacity:0.9; }
+    #statusSC { color:#9fb6c6; font-size:12px; opacity:0.95; margin-left:8px; }
+
+    .statusButtons { display:flex; gap:8px; align-items:center; }
+    .statusButtons button {
+      background:transparent;
+      color:#fff;
+      border:1px solid #2b2b2b;
+      padding:6px 10px;
+      border-radius:4px;
+      cursor:pointer;
+    }
+    #logoutBtn { display:none; }
+
+    /* main two-column container */
+    #container { display:flex; width:100%; height:calc(100vh - 36px); }
+    .col { flex:1; display:flex; flex-direction:column; min-width:0; }
+    #leftCol { border-right:1px solid #333; }
+    /* shared history styles */
+    .history {
+      flex:1;
+      padding:10px;
+      overflow:auto;
+      background:#111;
+      color:#eee;
+    }
+    /* right column (login) */
+    #rightCol { background:#0b0b0b; padding:16px; align-items:center; justify-content:center; }
+    #loginBox {
+      width:100%;
+      max-width:360px;
+      background: #131313;
+      border: 1px solid #2b2b2b;
+      padding: 12px;
+      border-radius:6px;
+      color:#ddd;
+    }
+    #loginBox h3 { margin:0 0 8px 0; font-weight:normal; color:#fff; }
+    #loginBox input {
+      width:100%;
+      box-sizing:border-box;
+      padding:8px;
+      margin:6px 0;
+      background:#000;
+      color:#fff;
+      border:1px solid #444;
+      font-family:monospace;
+      font-size:14px;
+    }
+    #loginBox button {
+      width:100%;
+      padding:8px;
+      margin-top:8px;
+      background:#1f6feb;
+      color:white;
+      border:none;
+      cursor:pointer;
+      font-weight:600;
+    }
+    #loginStatus { margin-top:8px; font-size:13px; color:#cfcfcf; min-height:18px; }
+    .cmd { color:#8be9fd; }
+    .out { color:#50fa7b; white-space:pre-wrap; }
+    .err { color:#ff6b6b; white-space:pre-wrap; }
+    /* JSON pretty block */
+    .json {
+      background: rgba(255,255,255,0.02);
+      color: #cfd8dc;
+      padding:8px;
+      margin:4px 0;
+      border-radius:4px;
+      white-space:pre;
+      overflow:auto;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    /* input row stays at bottom of left column */
+    #inputRow { display:flex; padding:8px; background:#222; }
+    #cmd { flex:1; font-family:monospace; font-size:14px; padding:6px; background:#000; color:#fff; border:1px solid #444; }
+    button { margin-left:8px; }
+    /* make sure elements don't force column overflow */
+    #history { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="statusBar" role="status" aria-live="polite">
+    <div id="statusText">
+      <span id="statusLabel">Not logged in</span>
+      <span id="statusToken" title=""></span>
+      <span id="statusSC"></span>
+    </div>
+    <div class="statusButtons">
+      <button id="scConnectBtn">Connect</button>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </div>
+
+  <div id="container">
+    <div id="leftCol" class="col">
+      <div id="history" class="history" aria-live="polite"></div>
+      <div id="inputRow">
+        <input id="cmd" autocomplete="off" placeholder="Type a Python expression or statement and press Enter" />
+        <button id="send">Send</button>
+        <button id="clear">Clear</button>
+      </div>
+    </div>
+
+    <div id="rightCol" class="col">
+      <div id="loginBox" role="region" aria-label="Login">
+        <h3>User Login</h3>
+        <input id="loginEmail" type="email" autocomplete="email" placeholder="Email" />
+        <input id="loginUser" autocomplete="username" placeholder="Username" />
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="Password" />
+        <button id="loginBtn">Login</button>
+
+        <!-- new spacecraft ident input -->
+        <label for="spacecraftIdent" style="display:block;margin-top:8px;font-size:12px;color:#bbb;">Spacecraft ID</label>
+        <input id="spacecraftIdent" placeholder="(will be filled after login)" style="font-family:monospace;" />
+
+        <div id="loginStatus" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const historyEl = document.getElementById('history');
+    const cmdEl = document.getElementById('cmd');
+    const sendBtn = document.getElementById('send');
+    const clearBtn = document.getElementById('clear');
+
+    const loginBtn = document.getElementById('loginBtn');
+    const loginUserEl = document.getElementById('loginUser');
+    const loginEmailEl = document.getElementById('loginEmail');
+    const loginPassEl = document.getElementById('loginPass');
+    const loginStatusEl = document.getElementById('loginStatus');
+    const spacecraftIdentEl = document.getElementById('spacecraftIdent');
+
+    const statusLabel = document.getElementById('statusLabel');
+    const statusTokenEl = document.getElementById('statusToken');
+    const statusSCEl = document.getElementById('statusSC');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const scConnectBtn = document.getElementById('scConnectBtn');
+
+    let sessionId = localStorage.getItem('repl_session_id') || '';
+
+
+
+    // add near the top of your script (with other consts)
+  const cmdHistoryKey = 'cmd_history';
+  let cmdHistory = [];
+  try { cmdHistory = JSON.parse(localStorage.getItem(cmdHistoryKey) || '[]'); } catch (e) { cmdHistory = []; }
+  let historyIndex = null; // null = not navigating, 0 = most recent, increases -> older
+
+  function pushHistory(cmd) {
+    if (!cmd) return;
+    // avoid duplicate consecutive entries
+    if (cmdHistory.length === 0 || cmdHistory[0] !== cmd) {
+      cmdHistory.unshift(cmd);
+      if (cmdHistory.length > 100) cmdHistory.length = 100;
+      try { localStorage.setItem(cmdHistoryKey, JSON.stringify(cmdHistory)); } catch (e) {}
+    }
+    historyIndex = null;
+  }
+
+
+
+    // appendLine accepts either a string or a DOM Node
+    function appendLine(className, textOrNode) {
+      const wrapper = document.createElement('div');
+      wrapper.className = className;
+      if (textOrNode instanceof Node) {
+        wrapper.appendChild(textOrNode);
+      } else {
+        wrapper.textContent = textOrNode;
+      }
+      historyEl.appendChild(wrapper);
+      historyEl.scrollTop = historyEl.scrollHeight;
+    }
+
+    // Try to render value as pretty JSON; fallback to plain text
+    function appendMaybeJson(className, value) {
+      if (value !== null && typeof value === 'object') {
+        const pre = document.createElement('pre');
+        pre.className = 'json';
+        pre.textContent = JSON.stringify(value, null, 2);
+        appendLine(className, pre);
+        return;
+      }
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          const pre = document.createElement('pre');
+          pre.className = 'json';
+          pre.textContent = JSON.stringify(parsed, null, 2);
+          appendLine(className, pre);
+          return;
+        } catch (e) {
+          // not JSON, fall through to plain text
+        }
+      }
+      appendLine(className, String(value).trim());
+    }
+
+    function truncateToken(t) {
+      if (!t) return '';
+      if (t.length > 32) return t.slice(0,16) + '…' + t.slice(-8);
+      return t;
+    }
+
+    function getAuthToken() {
+      const raw = localStorage.getItem('auth_token');
+      if (!raw) return null;
+      // try parse common stored forms
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.token || parsed.access_token)) return parsed.token || parsed.access_token;
+        // if parsed is string-like, return it
+        if (typeof parsed === 'string') return parsed;
+      } catch (e) {
+        // not JSON, use raw string
+      }
+      return raw;
+    }
+
+    function updateStatusBar() {
+      const token = getAuthToken();
+      const user = localStorage.getItem('auth_user');
+      const scInfoRaw = localStorage.getItem('spacecraft_info');
+      const scConnected = localStorage.getItem('spacecraft_connected') === '1';
+
+      if (token) {
+        statusLabel.textContent = user ? `Logged in as ${user}` : 'Logged in';
+        statusTokenEl.textContent = truncateToken(token);
+        statusTokenEl.title = token;
+        logoutBtn.style.display = 'inline-block';
+        spacecraftIdentEl.disabled = false;
+      } else {
+        statusLabel.textContent = 'Not logged in';
+        statusTokenEl.textContent = '';
+        statusTokenEl.title = '';
+        logoutBtn.style.display = 'none';
+        spacecraftIdentEl.disabled = true;
+      }
+
+      if (scConnected) {
+        let scLabel = 'Connected';
+        try {
+          const info = scInfoRaw ? JSON.parse(scInfoRaw) : null;
+          if (info && (info.name || info.id)) scLabel = `Connected: ${info.name || info.id}`;
+        } catch (e) {}
+        statusSCEl.textContent = scLabel;
+        scConnectBtn.textContent = 'Disconnect';
+      } else {
+        statusSCEl.textContent = 'Not connected';
+        scConnectBtn.textContent = 'Connect';
+      }
+    }
+
+    function setSpacecraftConnected(info) {
+      try {
+        localStorage.setItem('spacecraft_connected', '1');
+        localStorage.setItem('spacecraft_info', JSON.stringify(info || {}));
+      } catch (e) {}
+      updateStatusBar();
+    }
+
+    function setSpacecraftDisconnected() {
+      try {
+        localStorage.removeItem('spacecraft_connected');
+        localStorage.removeItem('spacecraft_info');
+      } catch (e) {}
+      updateStatusBar();
+      appendLine('out', 'Spacecraft disconnected');
+    }
+
+    async function sendCommand(cmd) {
+      if (!cmd.trim()) return;
+      appendLine('cmd', '> ' + cmd);
+      try {
+        const res = await fetch('/console-execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: cmd, session_id: sessionId || null })
+        });
+        const data = await res.json();
+        if (data.session_id) {
+          sessionId = data.session_id;
+          localStorage.setItem('repl_session_id', sessionId);
+        }
+        if (data.output) appendMaybeJson('out', data.output);
+        if (data.error) appendMaybeJson('err', data.error);
+      } catch (e) {
+        appendLine('err', 'NetworkError: ' + e.message);
+      }
+    }
+
+    // fetch spacecraft info after login; populate spacecraftIdentEl
+    async function fetchSpacecraftInfo() {
+      const token = getAuthToken();
+      if (!token) return;
+      try {
+        const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+        const res = await fetch('/spacecraft', { method: 'GET', headers });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data) {
+          // try common fields
+          let ident = null;
+          if (typeof data === 'string') ident = data;
+          else if (Array.isArray(data) && data.length) {
+            // if list, try first item's id/ident
+            const first = data[0];
+            ident = first && (first.spacecraft_ident || first.ident || first.id || first.spacecraftId) || null;
+          } else if (typeof data === 'object') {
+            ident = data.spacecraft_ident || data.ident || data.id || data.spacecraftId || null;
+          }
+          if (ident) {
+            spacecraftIdentEl.value = ident;
+            try { localStorage.setItem('spacecraft_ident', String(ident)); } catch (e) {}
+            appendMaybeJson('out', { spacecraft_ident: ident });
+          } else {
+            // if no single ident, print response
+            appendMaybeJson('out', data);
+          }
+        } else {
+          appendMaybeJson('err', data || ('/spacecraft failed: ' + res.status));
+        }
+      } catch (e) {
+        appendLine('err', 'NetworkError: ' + e.message);
+      }
+    }
+
+    async function loginUser() {
+      const username = loginUserEl.value.trim();
+      const password = loginPassEl.value;
+      const email = loginEmailEl.value;
+      if (!username || !password) {
+        loginStatusEl.textContent = 'Enter username and password';
+        return;
+      }
+      loginStatusEl.textContent = 'Logging in...';
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, email })
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok) {
+          const token = (data && (data.token || data.access_token)) || data || null;
+          if (token) {
+            appendMaybeJson('out', token);
+            setLoggedIn(typeof token === 'string' ? token : JSON.stringify(token), username || email || '');
+            loginStatusEl.textContent = 'Login successful';
+            // fetch spacecraft info now that we have a token
+            await fetchSpacecraftInfo();
+            return;
+          }
+          appendMaybeJson('out', data || 'Login succeeded (no token)');
+          loginStatusEl.textContent = 'Login succeeded';
+          // still try to fetch spacecraft if possible (unlikely)
+          await fetchSpacecraftInfo();
+        } else {
+          appendMaybeJson('err', data || ('Login failed: ' + res.status));
+          loginStatusEl.textContent = 'Login failed';
+        }
+      } catch (e) {
+        appendLine('err', 'NetworkError: ' + e.message);
+        loginStatusEl.textContent = 'Network error';
+      }
+    }
+
+    function setLoggedIn(token, user) {
+      try {
+        if (typeof token === 'object') {
+          localStorage.setItem('auth_token', JSON.stringify(token));
+        } else {
+          localStorage.setItem('auth_token', String(token));
+        }
+        if (user) localStorage.setItem('auth_user', String(user));
+      } catch (e) {}
+      updateStatusBar();
+    }
+
+    function setLoggedOut() {
+      try {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+      } catch (e) {}
+      updateStatusBar();
+      appendLine('out', 'Logged out');
+    }
+
+    async function connectSpacecraft() {
+      scConnectBtn.disabled = true;
+      const sc_ident = (spacecraftIdentEl.value || localStorage.getItem('spacecraft_ident') || '').trim();
+      appendLine('cmd', '> spacecraft_connect ' + (sc_ident || '(no ident)'));
+      try {
+        const token = getAuthToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const body = sc_ident ? { sc_ident } : {};
+        const res = await fetch('/spacecraft_connect', { method: 'POST', headers, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => null);
+        if (res.ok) {
+          // store info if available
+          setSpacecraftConnected(data || { ident: sc_ident || null });
+          appendMaybeJson('out', data || { result: 'connected', sc_ident });
+        } else {
+          appendMaybeJson('err', data || ('Connect failed: ' + res.status));
+        }
+      } catch (e) {
+        appendLine('err', 'NetworkError: ' + e.message);
+      } finally {
+        scConnectBtn.disabled = false;
+      }
+    }
+
+    async function disconnectSpacecraft() {
+      scConnectBtn.disabled = true;
+      const sc_ident = (spacecraftIdentEl.value || localStorage.getItem('spacecraft_ident') || '').trim();
+      appendLine('cmd', '> spacecraft_disconnect');
+      try {
+        const token = getAuthToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const body = sc_ident ? { sc_ident } : {};
+        const res = await fetch('/spacecraft_disconnect', { method: 'POST', headers, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => null);
+        if (res.ok) {
+          setSpacecraftDisconnected();
+          appendMaybeJson('out', data || { result: 'disconnected' });
+        } else {
+          appendMaybeJson('err', data || ('Disconnect failed: ' + res.status));
+        }
+      } catch (e) {
+        appendLine('err', 'NetworkError: ' + e.message);
+      } finally {
+        scConnectBtn.disabled = false;
+      }
+    }
+
+    // events
+    sendBtn.addEventListener('click', () => {
+    const v = cmdEl.value;
+    cmdEl.value = '';
+    pushHistory(v);
+    sendCommand(v);
+  });
+
+  // reset history navigation when the user types
+  cmdEl.addEventListener('input', () => {
+    historyIndex = null;
+  });
+
+    clearBtn.addEventListener('click', () => {
+      historyEl.innerHTML = '';
+    });
+
+    loginBtn.addEventListener('click', () => {
+      loginUser();
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      setLoggedOut();
+    });
+
+    scConnectBtn.addEventListener('click', () => {
+      const connected = localStorage.getItem('spacecraft_connected') === '1';
+      if (connected) {
+        disconnectSpacecraft();
+      } else {
+        connectSpacecraft();
+      }
+    });
+
+    // allow Enter in password field to submit
+    loginPassEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        loginUser();
+      }
+    });
+
+    // Send on Enter in cmd, allow Shift+Enter for newline
+    cmdEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (cmdHistory.length === 0) return;
+      if (historyIndex === null) historyIndex = 0;
+      else if (historyIndex < cmdHistory.length - 1) historyIndex++;
+      cmdEl.value = cmdHistory[historyIndex] || '';
+      // move caret to end
+      requestAnimationFrame(() => { cmdEl.selectionStart = cmdEl.selectionEnd = cmdEl.value.length; });
+      return;
+    }
+
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (historyIndex === null) return;
+      if (historyIndex > 0) {
+        historyIndex--;
+        cmdEl.value = cmdHistory[historyIndex] || '';
+      } else {
+        historyIndex = null;
+        cmdEl.value = '';
+      }
+      requestAnimationFrame(() => { cmdEl.selectionStart = cmdEl.selectionEnd = cmdEl.value.length; });
+      return;
+    }
+
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      sendBtn.click();
+    }
+    });
+
+    // init status and populate saved ident
+    spacecraftIdentEl.value = localStorage.getItem('spacecraft_ident') || '';
+    updateStatusBar();
+
+    // focus command input on load
+    cmdEl.focus();
+  </script>
+</body>
+</html>

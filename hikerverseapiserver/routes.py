@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from typing import Annotated
 from datetime import datetime, timezone
@@ -10,10 +11,11 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.requests import Request
+from starlette.responses import FileResponse
 
 from hikerservespacecraft.spacecraft import Spacecraft
 from hikerservespacecraft.spacecraft_constructor import get_initial_spacecraft
-from hikerservespacecraft.utils.serialization import serialize, deserialize2
+from hikerservespacecraft.utils.ser import serialize, deserialize
 from hikerverseapiserver import schemas
 from hikerverseapiserver.dependencies import get_db
 
@@ -341,7 +343,7 @@ def spacecraft_connect(
         sc.is_active = True
         sc.save(db=db)
         print(f"Adding active spacecraft {sc.id}")
-        spacecraft_: Spacecraft = deserialize2(sc.spacecraft_metadata) if sc else None
+        spacecraft_: Spacecraft = deserialize(sc.spacecraft_metadata) if sc else None
         app.state.global_data["universe"]["spacecraft"][sc.id] = spacecraft_
 
     return {"status_code": 100, "success": True, "msg": "Spacecraft succesfully connected"}
@@ -350,7 +352,7 @@ def spacecraft_connect(
 @router.post("/spacecraft_disconnect", response_model=schemas.SuccessResponseScheme, status_code=201)
 def spacecraft_disconnect(
         token: Annotated[str, Depends(oauth2_scheme)],
-        data: schemas.SpacecraftConnectSchema,
+        data: schemas.SpacecraftDisconnectSchema,
         db: Session = Depends(get_db),
 ):
     payload = decode_token_with_blacklisted(token=token, db=db)
@@ -367,4 +369,23 @@ def spacecraft_disconnect(
     if not sc:
         return {"status_code": -101, "success": False, "msg": "Incorrect/unknown spacecraft ident"}
 
-    return {"status_code": 100, "success": True, "msg": "Spacecraft succesfully connected"}
+    return {"status_code": 100, "success": True, "msg": "Spacecraft succesfully disconnected"}
+
+
+@app.post("/console-execute")
+async def console_page(request: Request):
+    data = await request.json()
+    code = data.get("code", "")
+    session_id = data.get("session_id", None)
+
+    print(f"Console execute request: session_id={session_id}, code={code!r}")
+    # do nothgin
+    return {"output": code, "error": "", "session_id": session_id}
+    #exec_request = ExecRequest(code=code, session_id=session_id)
+    #esult = await execute(exec_request)
+    #return result
+
+@app.get("/console")
+async def console_page():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "console.html"))
+

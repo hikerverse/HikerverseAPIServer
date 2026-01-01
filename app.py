@@ -1,3 +1,5 @@
+import os
+import threading
 from typing import Dict, Any
 
 import numpy as np
@@ -9,7 +11,14 @@ import asyncio
 from starlette.applications import Starlette
 import logging
 
+from starlette.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
+
 from hikerverseuniverse.universe_api import get_all_celestials
+
+
+sessions = {}
+sessions_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -33,3 +42,12 @@ async def lifespan(app: FastAPI):
         app.state.lock = None
 
 app: FastAPI = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
+here = os.path.dirname(os.path.abspath(__file__))
+static_dir = os.path.join(here, "hikerverseapiserver", "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["*"],
+)

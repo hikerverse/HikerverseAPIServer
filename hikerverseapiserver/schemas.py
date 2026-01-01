@@ -20,6 +20,9 @@ class Spacecraft(SpacecraftBase):
 class SpacecraftConnectSchema(BaseModel):
     sc_ident: str
 
+class SpacecraftDisconnectSchema(BaseModel):
+    sc_ident: str
+
 class CommanderBase(BaseModel):
     email: EmailStr
     full_name: str

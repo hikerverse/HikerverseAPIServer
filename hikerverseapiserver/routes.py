@@ -1,14 +1,16 @@
 import json
 import os
 import uuid
-from typing import Annotated
+from dataclasses import is_dataclass, asdict
+from json import JSONEncoder
+from typing import Annotated, Any
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Response, Cookie
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordBearer
 
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import FileResponse
@@ -39,6 +41,74 @@ from hikerverseapiserver.tasks import (
 )
 from hikerversedb import models
 from app import app
+
+
+
+
+class CommandResponseEncoder(JSONEncoder):
+    """
+    JSON encoder that serializes:
+      - Pydantic BaseModel (via .dict())
+      - dataclasses (via asdict)
+      - CommandResponse (imported lazily from schemas)
+      - datetime -> isoformat
+      - UUID -> str
+      - bytes -> utf-8 decoded string
+      - set -> list
+    Use with: json.dumps(obj, cls=CommandResponseEncoder)
+    """
+    def default(self, obj: Any) -> Any:
+        # Pydantic models
+        if isinstance(obj, BaseModel):
+            return obj.dict()
+
+        # dataclasses
+        if is_dataclass(obj):
+            return asdict(obj)
+
+        # lazy import to avoid circular imports; handle CommandResponse specifically
+        try:
+            from hikerverseapiserver import schemas
+            CommandResponse = getattr(schemas, "CommandResponse", None)
+            if CommandResponse is not None and isinstance(obj, CommandResponse):
+                # If CommandResponse is a Pydantic model, previous branch handled it.
+                # Otherwise, try dict() then fallback to __dict__.
+                return getattr(obj, "dict", lambda: obj.__dict__)()
+        except Exception:
+            # ignore import errors and continue
+            pass
+
+        # datetime
+        if isinstance(obj, datetime.datetime):
+            # ensure timezone-aware formatting
+            try:
+                return obj.isoformat()
+            except Exception:
+                return obj.strftime("%Y-%m-%dT%H:%M:%S")
+
+        # UUID
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+
+        # bytes
+        if isinstance(obj, (bytes, bytearray)):
+            try:
+                return obj.decode("utf-8")
+            except Exception:
+                return list(obj)
+
+        # set -> list
+        if isinstance(obj, set):
+            return list(obj)
+
+        return super().default(obj)
+
+
+
+
+
+
+
 
 router = APIRouter()
 
@@ -375,10 +445,39 @@ def spacecraft_disconnect(
 @app.post("/console-execute")
 async def console_page(request: Request):
     data = await request.json()
-    code = data.get("code", "")
+    command = data.get("command", "")
+    sc_ident = data.get("sc_ident", "")
     session_id = data.get("session_id", None)
+    # extract token from Authorization header: "Bearer <token>"
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token = None
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
 
-    print(f"Console execute request: session_id={session_id}, code={code!r}")
+    print(f"Console execute request: session_id={session_id}, code={command!r}")
+
+    command = json.loads(command)
+    # send request to endpoint instant_command
+    # Build InstantCommandSchema from payload. Expect either a JSON string with
+    # {"spacecraft_ident": "...", "command": "..."} or treat `code` as raw command.
+    payload_obj = {"command": command, "spacecraft_ident": sc_ident}
+
+    data_schema = schemas.InstantCommandSchema(**payload_obj)
+
+    # Resolve DB dependency manually and call the endpoint function directly.
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        result = instant_command(token=token, data=data_schema, db=db)
+    finally:
+        try:
+            db_gen.close()
+        except Exception as e:
+            pass
+
+    return Response(content=json.dumps(result, cls=CommandResponseEncoder), media_type="application/json")
+
+
     # do nothgin
     return {"output": code, "error": "", "session_id": session_id}
     #exec_request = ExecRequest(code=code, session_id=session_id)
